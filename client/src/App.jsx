@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { gameApi } from './api.js';
+import { gameApi, savesApi } from './api.js';
 import FleetPanel from './components/FleetPanel.jsx';
 import LetterCard from './components/LetterCard.jsx';
 import MapPanel from './components/MapPanel.jsx';
 import RelationsPanel from './components/RelationsPanel.jsx';
 import ReportDialog from './components/ReportDialog.jsx';
+import SaveSlotBar from './components/SaveSlotBar.jsx';
 import WeatherPanel from './components/WeatherPanel.jsx';
 
 function App() {
   const [game, setGame] = useState(null);
+  const [saves, setSaves] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [previewState, setPreviewState] = useState(null);
   const [report, setReport] = useState(null);
@@ -19,10 +21,11 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    gameApi.getState()
-      .then(({ state }) => {
+    Promise.all([gameApi.getState(), savesApi.list().catch(() => null)])
+      .then(([{ state }, saveList]) => {
         if (!active) return;
         setGame(state);
+        if (saveList) setSaves(saveList);
         if (state.recovery?.reason) setError(`存档已恢复：${state.recovery.reason}`);
         if (state.lastReport && state.phase !== 'planning') setReport(state.lastReport);
       })
@@ -30,6 +33,10 @@ function App() {
       .finally(() => active && setLoading(false));
     return () => { active = false; };
   }, []);
+
+  function refreshSaves() {
+    savesApi.list().then(setSaves).catch(() => {});
+  }
 
   const assignmentsKey = useMemo(() => JSON.stringify(assignments), [assignments]);
   const previewKey = game
@@ -137,6 +144,7 @@ function App() {
       setReport(result.report);
       setAssignments([]);
       setPreviewState(null);
+      refreshSaves();
     } catch (requestError) {
       if (requestError.status === 409) {
         try {
@@ -160,6 +168,47 @@ function App() {
     setError('');
     try {
       const { state } = await gameApi.reset();
+      setGame(state);
+      setAssignments([]);
+      setPreviewState(null);
+      setReport(null);
+      refreshSaves();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function switchSave(slotId) {
+    if (!slotId || slotId === saves?.activeSlotId) return;
+    setBusy(true);
+    setError('');
+    try {
+      const saveList = await savesApi.switch(slotId);
+      const { state } = await gameApi.getState();
+      setSaves(saveList);
+      setGame(state);
+      setAssignments([]);
+      setPreviewState(null);
+      setReport(null);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createSave() {
+    const name = window.prompt('新存档的名称：', `航线 ${(saves?.slots.length ?? 0) + 1}`);
+    if (name === null) return;
+    setBusy(true);
+    setError('');
+    try {
+      const created = await savesApi.create({ name: name.trim() || undefined });
+      const saveList = await savesApi.switch(created.slot.id);
+      const { state } = await gameApi.getState();
+      setSaves(saveList);
       setGame(state);
       setAssignments([]);
       setPreviewState(null);
@@ -227,6 +276,8 @@ function App() {
             <small>日</small>
           </div>
         </div>
+
+        <SaveSlotBar saves={saves} busy={busy} onSwitch={switchSave} onCreate={createSave} />
 
         <button type="button" className="reset-button" onClick={resetGame} disabled={busy}>重新开局</button>
       </header>

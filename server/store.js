@@ -268,6 +268,21 @@ export class GameStore {
     return structuredClone(result);
   }
 
+  replace(nextState) {
+    if (!this.state) this.load();
+    const previousState = this.state;
+    const candidate = structuredClone(nextState);
+    candidate.updatedAt = new Date().toISOString();
+    try {
+      this.state = candidate;
+      this.save();
+    } catch (error) {
+      this.state = previousState;
+      throw error;
+    }
+    return this.getState();
+  }
+
   reset(seed = Date.now()) {
     if (!this.state) this.load();
     const previousState = this.state;

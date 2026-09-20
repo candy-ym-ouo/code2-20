@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
-import { advanceDay, GameRuleError, previewPlan, publicGameState } from './engine.js';
-import { assertPlanningPhase } from './store.js';
+import { SingleSlotCoordinator } from './coordinator.js';
+import { GameRuleError } from './engine.js';
 
 function getAssignments(body) {
   if (body === undefined || body === null) {
@@ -20,22 +20,19 @@ function getAssignments(body) {
   return body.assignments;
 }
 
-function assertExpectedRevision(state, expectedRevision) {
-  if (!Number.isInteger(expectedRevision)) {
-    throw new GameRuleError('提交游戏进度时必须提供整数 expectedRevision。');
-  }
-  if (state.revision !== expectedRevision) {
-    throw new GameRuleError('游戏进度已在其他请求中更新，请刷新后再提交。', [], 409);
-  }
+function requestedSlot(request) {
+  const slot = request.query?.slot;
+  return typeof slot === 'string' && slot ? slot : undefined;
 }
 
-export function createApp({ store, clientDist }) {
+export function createApp({ store, coordinator, clientDist }) {
+  const coord = coordinator || new SingleSlotCoordinator(store);
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '100kb' }));
 
-  app.get('/api/health', (request, response) => {
-    const state = store.getState();
+  app.get('/api/health', async (request, response) => {
+    const state = await coord.getState();
     response.json({
       ok: true,
       phase: state.phase,
@@ -44,37 +41,66 @@ export function createApp({ store, clientDist }) {
     });
   });
 
-  app.get('/api/game', (request, response) => {
-    const state = publicGameState(store.getState());
-    const recovery = store.getRecovery?.();
-    response.json({ state: recovery ? { ...state, recovery } : state });
+  // ---------- 多存档调度 ----------
+
+  app.get('/api/saves', (request, response) => {
+    response.json(coord.listSlots());
   });
 
-  app.post('/api/game/plan/preview', (request, response) => {
-    const state = store.getState();
-    assertPlanningPhase(state);
-    response.json({ preview: previewPlan(state, getAssignments(request.body)) });
+  app.post('/api/saves', async (request, response) => {
+    const body = request.body && typeof request.body === 'object' && !Array.isArray(request.body)
+      ? request.body
+      : {};
+    const result = await coord.createSlot({ name: body.name, seed: body.seed });
+    response.status(201).json(result);
   });
 
-  app.post('/api/game/day/advance', (request, response) => {
-    const report = store.mutate((state) => {
-      assertPlanningPhase(state);
-      assertExpectedRevision(state, request.body?.expectedRevision);
-      return advanceDay(state, getAssignments(request.body));
-    });
-    response.json({
-      report,
-      state: publicGameState(store.getState())
-    });
+  app.post('/api/saves/:slotId/switch', async (request, response) => {
+    response.json(await coord.switchSlot(request.params.slotId));
   });
 
-  app.post('/api/game/reset', (request, response) => {
+  app.delete('/api/saves/:slotId', async (request, response) => {
+    response.json(await coord.deleteSlot(request.params.slotId));
+  });
+
+  app.get('/api/saves/:slotId/versions', async (request, response) => {
+    response.json({ versions: await coord.listVersions(request.params.slotId) });
+  });
+
+  app.get('/api/saves/:slotId/versions/:versionId', async (request, response) => {
+    response.json({ version: await coord.getVersion(request.params.versionId, request.params.slotId) });
+  });
+
+  app.post('/api/saves/:slotId/restore', async (request, response) => {
+    const state = await coord.restoreVersion(request.body?.versionId, request.params.slotId);
+    response.json({ state });
+  });
+
+  // ---------- 当前（或指定）槽位的游戏操作 ----------
+
+  app.get('/api/game', async (request, response) => {
+    response.json({ state: await coord.getState(requestedSlot(request)) });
+  });
+
+  app.post('/api/game/plan/preview', async (request, response) => {
+    response.json({ preview: await coord.preview(getAssignments(request.body), requestedSlot(request)) });
+  });
+
+  app.post('/api/game/day/advance', async (request, response) => {
+    const { report, state } = await coord.advance(
+      getAssignments(request.body),
+      request.body?.expectedRevision,
+      requestedSlot(request)
+    );
+    response.json({ report, state });
+  });
+
+  app.post('/api/game/reset', async (request, response) => {
     const requestedSeed = request.body?.seed;
     const seed = requestedSeed === undefined || requestedSeed === null || requestedSeed === ''
       ? Date.now()
       : String(requestedSeed);
-    const state = store.reset(seed);
-    response.json({ state: publicGameState(state) });
+    response.json({ state: await coord.reset(seed, requestedSlot(request)) });
   });
 
   app.use('/api', (request, response) => {
@@ -95,7 +121,8 @@ export function createApp({ store, clientDist }) {
     if (statusCode >= 500) console.error(error);
     response.status(statusCode).json({
       error: error.message || '服务器发生未知错误。',
-      issues: error.issues || undefined
+      issues: error.issues || undefined,
+      conflictId: error.conflictId || undefined
     });
   });
 

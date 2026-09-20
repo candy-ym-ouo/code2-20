@@ -205,6 +205,51 @@ code {
   transition: 160ms ease;
 }
 
+.save-slot-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.save-slot-label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7d93aa;
+}
+
+.save-slot-bar select {
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  color: #dcebf7;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  max-width: 240px;
+}
+
+.save-slot-bar select:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.save-slot-bar button {
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  color: #a7bfd4;
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.save-slot-bar button:hover:not(:disabled),
+.save-slot-bar select:hover:not(:disabled) {
+  border-color: rgba(84, 215, 232, 0.55);
+  color: white;
+  background: rgba(84, 215, 232, 0.07);
+}
+
 .reset-button:hover,
 .clear-button:hover:not(:disabled) {
   border-color: rgba(84, 215, 232, 0.55);

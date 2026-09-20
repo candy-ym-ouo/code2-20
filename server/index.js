@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.js';
-import { GameStore } from './store.js';
+import { SaveCoordinator } from './coordinator.js';
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(currentDirectory, '..');
@@ -11,15 +11,20 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   process.exit(1);
 }
 const isProduction = process.env.NODE_ENV === 'production' || process.env.npm_lifecycle_event === 'start';
-const dataFile = process.env.DATA_FILE || path.join(currentDirectory, 'data', 'game-state.json');
+const savesDirectory = process.env.SAVES_DIR || path.join(currentDirectory, 'data', 'saves');
+const legacyFile = process.env.DATA_FILE || path.join(currentDirectory, 'data', 'game-state.json');
 const clientDist = path.join(rootDirectory, 'dist');
-const store = new GameStore(dataFile, { days: 14 });
-const initialState = store.load();
+const coordinator = new SaveCoordinator(savesDirectory, {
+  game: { days: 14 },
+  legacyFile
+});
+const { activeSlotId, slots } = await coordinator.load();
+const activeSlot = slots.find((slot) => slot.id === activeSlotId);
 
-const app = createApp({ store, clientDist });
+const app = createApp({ coordinator, clientDist });
 const server = app.listen(port, () => {
   console.log(`[浮空岛邮政署] API 已启动：http://localhost:${port}`);
-  console.log(`[浮空岛邮政署] 当前进度：第 ${initialState.day} 日 / ${initialState.days} 日`);
+  console.log(`[浮空岛邮政署] 存档槽位 ${slots.length} 个，当前：${activeSlot?.name ?? activeSlotId}（第 ${activeSlot?.day ?? '?'} 日）`);
   if (!isProduction) {
     console.log('[浮空岛邮政署] 开发面板由 Vite 提供：http://localhost:5173');
   }

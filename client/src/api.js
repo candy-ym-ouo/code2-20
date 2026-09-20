@@ -29,3 +29,21 @@ export const gameApi = {
     body: JSON.stringify(seed === undefined || seed === null ? {} : { seed })
   })
 };
+
+export const savesApi = {
+  list: () => request('/api/saves'),
+  create: ({ name, seed } = {}) => request('/api/saves', {
+    method: 'POST',
+    body: JSON.stringify({ name, seed })
+  }),
+  switch: (slotId) => request(`/api/saves/${encodeURIComponent(slotId)}/switch`, {
+    method: 'POST',
+    body: '{}'
+  }),
+  remove: (slotId) => request(`/api/saves/${encodeURIComponent(slotId)}`, { method: 'DELETE' }),
+  listVersions: (slotId) => request(`/api/saves/${encodeURIComponent(slotId)}/versions`),
+  restore: (slotId, versionId) => request(`/api/saves/${encodeURIComponent(slotId)}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ versionId })
+  })
+};
